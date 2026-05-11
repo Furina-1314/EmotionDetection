@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Detect emotions from newline-separated English comments and count frequencies.
-
-Usage:
-  python emotion_counter.py --file comments.txt
-  cat comments.txt | python emotion_counter.py
-"""
+"""Detect emotions from newline-separated English comments and count frequencies."""
 
 from __future__ import annotations
 
@@ -17,18 +12,54 @@ from typing import Dict, Iterable, List, Set
 WORD_RE = re.compile(r"[a-z']+")
 
 
+COMMON_SUFFIXES = ("ing", "ed", "ly", "ness", "ment", "tion", "s")
+
+
+def normalize_token(token: str) -> str:
+    """Lightweight normalization to improve hit rate without extra dependencies."""
+    t = token.lower().strip("'")
+    if len(t) <= 3:
+        return t
+
+    # Handle common contractions.
+    if t.endswith("n't"):
+        t = t[:-3]
+
+    # Simple suffix stripping.
+    for suffix in COMMON_SUFFIXES:
+        if len(t) > len(suffix) + 2 and t.endswith(suffix):
+            t = t[: -len(suffix)]
+            break
+    return t
+
+
+def expand_keywords(raw_keywords: Set[str]) -> Set[str]:
+    expanded: Set[str] = set()
+    for kw in raw_keywords:
+        kw = kw.lower()
+        expanded.add(kw)
+        if " " not in kw:
+            expanded.add(normalize_token(kw))
+    return expanded
+
+
 @dataclass(frozen=True)
 class EmotionModel:
     lexicon: Dict[str, Set[str]]
 
     def detect(self, text: str) -> Set[str]:
-        tokens = WORD_RE.findall(text.lower())
+        raw_tokens = WORD_RE.findall(text.lower())
+        tokens = [normalize_token(tok) for tok in raw_tokens]
         found: Set[str] = set()
 
-        joined_bigrams = {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
+        raw_bigrams = {f"{raw_tokens[i]} {raw_tokens[i+1]}" for i in range(len(raw_tokens) - 1)}
+        norm_bigrams = {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
 
         for emotion, keywords in self.lexicon.items():
-            if keywords.intersection(tokens) or keywords.intersection(joined_bigrams):
+            if keywords.intersection(raw_tokens) or keywords.intersection(tokens):
+                found.add(emotion)
+                continue
+            if keywords.intersection(raw_bigrams) or keywords.intersection(norm_bigrams):
                 found.add(emotion)
 
         if not found:
@@ -37,37 +68,38 @@ class EmotionModel:
 
 
 def build_default_model() -> EmotionModel:
-    # Expanded lexicon for 28 emotion labels.
-    lexicon = {
-        "admiration": {"admire", "admired", "admirable", "respect", "impressed", "inspiring", "brilliant"},
-        "amusement": {"funny", "hilarious", "amusing", "laugh", "laughed", "lol", "entertaining"},
-        "anger": {"angry", "furious", "rage", "enraged", "outraged", "irate", "hate"},
-        "annoyance": {"annoyed", "irritated", "bothered", "frustrated", "fed up", "tired of", "aggravating"},
-        "approval": {"approve", "approved", "agree", "acceptable", "good job", "well done", "support"},
-        "caring": {"care", "caring", "compassion", "kind", "gentle", "sympathetic", "concerned"},
-        "confusion": {"confused", "puzzled", "unclear", "lost", "bewildered", "perplexed", "mixed up"},
-        "curiosity": {"curious", "wonder", "wondering", "interested", "intrigued", "explore", "question"},
+    raw_lexicon = {
+        "admiration": {"admire", "admirable", "respect", "impressed", "inspiring", "brilliant", "excellent"},
+        "amusement": {"funny", "hilarious", "amusing", "laugh", "lol", "lmao", "entertaining", "joke"},
+        "anger": {"angry", "furious", "rage", "enraged", "outraged", "irate", "hate", "fuming"},
+        "annoyance": {"annoy", "irritat", "bother", "frustrat", "fed up", "tired of", "aggravat"},
+        "approval": {"approve", "agree", "acceptable", "good job", "well done", "support", "solid"},
+        "caring": {"care", "compassion", "kind", "gentle", "sympathetic", "concern", "thoughtful"},
+        "confusion": {"confus", "puzzl", "unclear", "lost", "bewilder", "perplex", "mixed up"},
+        "curiosity": {"curious", "wonder", "interest", "intrigu", "explore", "question"},
         "desire": {"want", "wish", "desire", "crave", "longing", "hope for", "need"},
-        "disappointment": {"disappointed", "let down", "underwhelmed", "missed", "unmet", "dissatisfied"},
-        "disapproval": {"disapprove", "disliked", "wrong", "unacceptable", "against", "object", "disagree"},
-        "disgust": {"disgusted", "gross", "nasty", "revolting", "sickening", "repulsive", "ew"},
-        "embarrassment": {"embarrassed", "awkward", "ashamed", "humiliated", "cringe", "self-conscious"},
-        "excitement": {"excited", "thrilled", "pumped", "eager", "can't wait", "stoked"},
-        "fear": {"afraid", "scared", "fear", "terrified", "frightened", "worried", "anxious"},
-        "gratitude": {"grateful", "thankful", "thanks", "appreciate", "appreciated", "blessed"},
-        "grief": {"grief", "mourning", "bereaved", "devastated", "heartbroken", "loss"},
-        "joy": {"happy", "joy", "delighted", "glad", "cheerful", "pleased", "wonderful"},
+        "disappointment": {"disappoint", "let down", "underwhelmed", "missed", "unmet", "dissatisf"},
+        "disapproval": {"disapprove", "dislike", "wrong", "unacceptable", "against", "object", "disagree"},
+        "disgust": {"disgust", "gross", "nasty", "revolting", "sickening", "repulsive", "ew"},
+        "embarrassment": {"embarrass", "awkward", "ashamed", "humiliat", "cringe", "self conscious"},
+        "excitement": {"excit", "thrill", "pumped", "eager", "can't wait", "stoked", "hyped"},
+        "fear": {"afraid", "scared", "fear", "terrifi", "frighten", "worri", "anxious", "panic"},
+        "gratitude": {"grateful", "thankful", "thanks", "appreciat", "blessed", "much appreciated"},
+        "grief": {"grief", "mourning", "bereav", "devastat", "heartbroken", "loss"},
+        "joy": {"happy", "joy", "delight", "glad", "cheerful", "pleased", "wonderful", "great"},
         "love": {"love", "adore", "cherish", "beloved", "affection", "romantic", "fond"},
-        "nervousness": {"nervous", "tense", "jittery", "uneasy", "on edge", "restless"},
+        "nervousness": {"nervous", "tense", "jittery", "uneasy", "on edge", "restless", "stressed"},
         "optimism": {"optimistic", "hopeful", "positive", "confident", "bright", "promising"},
-        "pride": {"proud", "accomplished", "achievement", "honored", "dignified", "self-respect"},
-        "realization": {"realize", "realized", "aware", "it dawned", "figured out", "understood"},
-        "relief": {"relieved", "finally", "at last", "thank goodness", "unburdened", "reassured"},
-        "remorse": {"remorse", "regret", "sorry", "apologize", "guilty", "ashamed of"},
-        "sadness": {"sad", "down", "depressed", "unhappy", "sorrow", "cry", "lonely"},
-        "surprise": {"surprised", "shocked", "amazed", "astonished", "unexpected", "wow"},
+        "pride": {"proud", "accomplish", "achievement", "honored", "dignified", "self respect"},
+        "realization": {"realize", "aware", "it dawned", "figured out", "understood", "i see"},
+        "relief": {"relieved", "finally", "at last", "thank goodness", "unburden", "reassured"},
+        "remorse": {"remorse", "regret", "sorry", "apologize", "guilty", "my bad"},
+        "sadness": {"sad", "down", "depress", "unhappy", "sorrow", "cry", "lonely"},
+        "surprise": {"surpris", "shocked", "amazed", "astonish", "unexpected", "wow"},
         "neutral": set(),
     }
+
+    lexicon = {emotion: expand_keywords(words) for emotion, words in raw_lexicon.items()}
     return EmotionModel(lexicon=lexicon)
 
 

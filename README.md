@@ -8,6 +8,12 @@ admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity,
 
 > `neutral` 规则：当一条评论没有命中任何其他情绪词时，记为 `neutral`。
 
+## 命中率增强
+
+- 加入轻量级词形归一化（如常见后缀 `-ing/-ed/-ly/-ness/-ment/-tion/-s` 处理）
+- 同时匹配原始词、归一化词、二元短语（bigram）
+- 扩展了词典覆盖的常见口语表达
+
 ## 使用方法
 
 ```bash
